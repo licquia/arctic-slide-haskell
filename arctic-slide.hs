@@ -1,5 +1,6 @@
 import Data.List
 import Data.Array
+import Control.Monad.Writer
 
 -- The arctic slide game logic is based on the Macintosh Polar
 -- shareware game by Go Endo. The game is a simple 4x24 grid
@@ -28,21 +29,32 @@ movable t = ( t == Bomb ) || ( t == Heart ) || ( t == Ice_Block )
 fixed :: Tile -> Bool
 fixed t = ( t == House ) || ( t == Mountain )
 
+-- Keep track of the score with a writer monad.
+type ScoreTracker = Writer (Sum Int)
+
+noscore :: a -> ScoreTracker a
+noscore x = writer (x, Sum 0)
+
+score :: a -> ScoreTracker a
+score x = writer (x, Sum 1)
+
 -- Tile interactions: create a new list from the old list
 -- representing the pushed object and tiles ahead of it
-slide :: [ Tile ] -> [ Tile ]
-slide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = ( Ice_Block : ts )
-slide ( t : Empty : ts ) = ( Empty : ( slide ( t : ts ) ) )
+slide :: [ Tile ] -> ScoreTracker [ Tile ]
+slide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = noscore ( Ice_Block : ts )
+slide ( t : Empty : ts ) = let ( ts', s ) = runWriter $ slide ( t : ts )
+                           in writer ( Empty : ts', s )
 slide ( t : ts ) | ( null ts ) || ( blocking $ head ts ) = collide ( t : ts )
 
-collide :: [ Tile ] -> [ Tile ]
-collide [] = []
-collide ( t : ts ) | fixed t = ( t : ts )
-collide ( Bomb : Mountain : ts) = [ Empty, Empty ] ++ ts
-collide ( Heart : House : ts ) = [ Empty, House ] ++ ts 
-collide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = ( Empty : ts )
-collide ( t : ts ) | ( movable t ) && ( ( null ts ) || ( blocking $ head ts ) ) = ( t : ts )
-collide ( t : Empty : ts ) | movable t = ( Empty : ( slide( t : ts ) ) )
+collide :: [ Tile ] -> ScoreTracker [ Tile ]
+collide [] = noscore []
+collide ( t : ts ) | fixed t = noscore ( t : ts )
+collide ( Bomb : Mountain : ts) = noscore ( [ Empty, Empty ] ++ ts )
+collide ( Heart : House : ts ) = score ( [ Empty, House ] ++ ts )
+collide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = noscore ( Empty : ts )
+collide ( t : ts ) | ( movable t ) && ( ( null ts ) || ( blocking $ head ts ) ) = noscore ( t : ts )
+collide ( t : Empty : ts ) | movable t = let ( ts', s ) = runWriter $ slide ( t : ts )
+                                         in writer ( Empty : ts', s )
 
 -- Dir represents the orientation of the penguin
 data Dir = North | East | South | West
@@ -112,21 +124,21 @@ view_array board pos dir =
         West -> reverse tile_assoc
         North -> reverse tile_assoc 
 
-next_board_array :: BoardArray -> Pos -> Dir -> ( Bool, BoardArray )
-next_board_array board pos dir =
-    let ( penguin_moved, updated_view ) = step_array $ view_array board pos dir
-    in ( penguin_moved, board // updated_view )
+next_board_array :: BoardArray -> Pos -> Dir -> ScoreTracker ( Bool, BoardArray )
+next_board_array board pos dir = do
+    ( penguin_moved, updated_view ) <- step_array $ view_array board pos dir
+    return ( penguin_moved, board // updated_view )
 
 -- Get a list of tiles in the form of 2-tuples containing
 -- coordinates and tiles. Unzip, and forward a list of tiles
 -- to the collision logic, then zip up with coordinates again
 -- to be used for making an updated game board array.
-step_array :: TileAssocList -> ( Bool, TileAssocList )
-step_array [] = ( False, [] )
+step_array :: TileAssocList -> ScoreTracker ( Bool, TileAssocList )
+step_array [] = noscore ( False, [] )
 step_array tile_assoc = if ( walkable $ head tile_list )
-                        then ( True, tile_assoc )
-                        else ( False, zip coord_list
-                                          ( collide tile_list ) )
+                        then noscore ( True, tile_assoc )
+                        else let ( new_tile_list, s ) = runWriter $ collide tile_list
+                             in writer ( ( False, zip coord_list new_tile_list ), s )
     where ( coord_list, tile_list ) = unzip tile_assoc
 
 -- Here is a version for the list implementation
@@ -150,17 +162,18 @@ view_list board pos dir =
                 | otherwise = board !! row 
     in orient $ trim $ extract
 
-step_list :: [ Tile ] -> ( Bool, [ Tile ] )
-step_list [] = ( False, [] )
-step_list ts = if walkable ( head ts ) then ( True, ts )
-                                       else ( False, collide ts )
+step_list :: [ Tile ] -> ScoreTracker ( Bool, [ Tile ] )
+step_list [] = noscore ( False, [] )
+step_list ts = if walkable ( head ts ) then noscore ( True, ts )
+                                       else let ( ts', s ) = runWriter $ collide ts
+                                            in writer ( ( False, ts' ), s )
 
 -- Credit is due to Jeff Licquia for some refactoring of
 -- my original next_board method for the list implementation
-next_board_list :: BoardList -> Pos -> Dir -> ( Bool, BoardList )
-next_board_list board pos dir = 
-    let ( penguin_moved, updated_view_list ) = step_list $ view_list board pos dir
-    in ( penguin_moved, update_board_from_view_list board pos dir updated_view_list )
+next_board_list :: BoardList -> Pos -> Dir -> ScoreTracker ( Bool, BoardList )
+next_board_list board pos dir = do
+    ( penguin_moved, updated_view_list ) <- step_list $ view_list board pos dir
+    return ( penguin_moved, update_board_from_view_list board pos dir updated_view_list )
 
 apply_view_list_to_row :: [ Tile ] -> Int -> Bool -> [ Tile ] -> [Tile]
 apply_view_list_to_row orig pos True update = 
@@ -189,7 +202,9 @@ data World = World { wBoardList  :: BoardList,
                      wBoardArray :: BoardArray, 
                      wPenguinPos :: Pos,
                      wPenguinDir :: Dir,
-                     wHeartCount :: Int } deriving ( Show )
+                     wHeartCount :: Int, 
+                     wScoreList  :: Int, 
+                     wScoreArray :: Int } deriving ( Show )
 
 init_board_list :: BoardList 
 init_board_list = [[Tree,Empty,Empty,Empty,Empty,Empty,
@@ -220,7 +235,9 @@ init_world = ( World
     init_board_array 
     ( Pos 0 0 )
     South
-    3 )
+    3 
+    0 
+    0 )
 
 next_penguin_pos :: Pos -> Dir -> Pos
 next_penguin_pos pos dir = Pos ( posY pos + fst step ) ( posX pos + snd step )
@@ -234,14 +251,17 @@ next_world :: World -> Dir -> World
 next_world old_world move_dir =
     if ( move_dir /= wPenguinDir old_world )
     then ( World ( wBoardList old_world ) ( wBoardArray old_world ) 
-                 ( wPenguinPos old_world ) move_dir ( wHeartCount old_world ) )
+                 ( wPenguinPos old_world ) move_dir ( wHeartCount old_world ) 
+                 ( wScoreList old_world ) ( wScoreArray old_world ) )
     else ( World board_list board_array  
                  ( if penguin_moved_array then next_penguin_pos ( wPenguinPos old_world ) ( wPenguinDir old_world )
                                           else ( wPenguinPos old_world ) )
                  ( wPenguinDir old_world )
-                 ( wHeartCount old_world ) )
-    where ( penguin_moved_array, board_array ) = next_board_array ( wBoardArray old_world ) ( wPenguinPos old_world ) ( wPenguinDir old_world )
-          ( unused_penguin_moved_list, board_list ) = next_board_list ( wBoardList old_world ) ( wPenguinPos old_world ) ( wPenguinDir old_world )
+                 ( wHeartCount old_world ) 
+                 ( wScoreList old_world + getSum score_list ) 
+                 ( wScoreArray old_world + getSum score_array ) )
+    where ( ( penguin_moved_array, board_array ), score_array ) = runWriter $ next_board_array ( wBoardArray old_world ) ( wPenguinPos old_world ) ( wPenguinDir old_world )
+          ( ( unused_penguin_moved_list, board_list ), score_list ) = runWriter $ next_board_list ( wBoardList old_world ) ( wPenguinPos old_world ) ( wPenguinDir old_world )
 
 pretty_tiles :: [Tile] -> String
 pretty_tiles [] = "\n"
@@ -276,6 +296,8 @@ pretty_world world =
     "penguin @: " ++ show ( wPenguinPos world ) ++
     ", facing: "  ++ show ( wPenguinDir world ) ++
     ", hearts: "  ++ show ( wHeartCount world ) ++
+    ", scores: "  ++ show ( wScoreList world ) ++
+    ", "          ++ show ( wScoreArray world ) ++
     "\n" ++ pretty_board_list ( wBoardList world ) ++
     "\n" ++ pretty_board_array ( wBoardArray world )
 
