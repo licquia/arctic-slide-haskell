@@ -164,14 +164,14 @@ next_board_list board pos dir =
 
 apply_view_list_to_row :: [ Tile ] -> Int -> Bool -> [ Tile ] -> [Tile]
 apply_view_list_to_row orig pos True update = 
-    take ( pos + 1 ) orig ++ ( init update )
-apply_view_to_row orig pos False update = 
-    ( reverse ( init update ) ) ++ ( drop pos orig )
+    take ( pos + 1 ) orig ++ update
+apply_view_list_to_row orig pos False update = 
+    ( reverse update ) ++ ( drop pos orig )
 
 apply_view_list_to_rows :: BoardList -> Int -> Int -> Bool -> [ Tile ] -> BoardList
 apply_view_list_to_rows orig row pos is_forward update =
     take row orig ++
-    nest ( apply_view_to_row ( orig !! row ) pos is_forward update ) ++
+    nest ( apply_view_list_to_row ( orig !! row ) pos is_forward update ) ++
     drop ( row + 1 ) orig
 
 update_board_from_view_list :: BoardList -> Pos -> Dir -> [ Tile ] -> BoardList
@@ -276,8 +276,7 @@ pretty_world world =
     "penguin @: " ++ show ( wPenguinPos world ) ++
     ", facing: "  ++ show ( wPenguinDir world ) ++
     ", hearts: "  ++ show ( wHeartCount world ) ++
-    -- list implementation is currently broken
-    --"\n" ++ pretty_board_list ( wBoardList world ) ++ 
+    "\n" ++ pretty_board_list ( wBoardList world ) ++
     "\n" ++ pretty_board_array ( wBoardArray world )
 
 moves_to_dirs :: [(Dir, Int)] -> [Dir]
