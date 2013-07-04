@@ -42,8 +42,9 @@ score x = writer (x, Sum 1)
 -- representing the pushed object and tiles ahead of it
 slide :: [ Tile ] -> ScoreTracker [ Tile ]
 slide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = noscore ( Ice_Block : ts )
-slide ( t : Empty : ts ) = let ( ts', s ) = runWriter $ slide ( t : ts )
-                           in writer ( Empty : ts', s )
+slide ( t : Empty : ts ) = do
+                             ts' <- slide ( t : ts )
+                             return ( Empty : ts' )
 slide ( t : ts ) | ( null ts ) || ( blocking $ head ts ) = collide ( t : ts )
 
 collide :: [ Tile ] -> ScoreTracker [ Tile ]
@@ -53,8 +54,9 @@ collide ( Bomb : Mountain : ts) = noscore ( [ Empty, Empty ] ++ ts )
 collide ( Heart : House : ts ) = score ( [ Empty, House ] ++ ts )
 collide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = noscore ( Empty : ts )
 collide ( t : ts ) | ( movable t ) && ( ( null ts ) || ( blocking $ head ts ) ) = noscore ( t : ts )
-collide ( t : Empty : ts ) | movable t = let ( ts', s ) = runWriter $ slide ( t : ts )
-                                         in writer ( Empty : ts', s )
+collide ( t : Empty : ts ) | movable t = do
+                                           ts' <- slide ( t : ts )
+                                           return ( Empty : ts' )
 
 -- Dir represents the orientation of the penguin
 data Dir = North | East | South | West
@@ -137,8 +139,9 @@ step_array :: TileAssocList -> ScoreTracker ( Bool, TileAssocList )
 step_array [] = noscore ( False, [] )
 step_array tile_assoc = if ( walkable $ head tile_list )
                         then noscore ( True, tile_assoc )
-                        else let ( new_tile_list, s ) = runWriter $ collide tile_list
-                             in writer ( ( False, zip coord_list new_tile_list ), s )
+                        else do
+                          new_tile_list <- collide tile_list
+                          return ( False, zip coord_list new_tile_list )
     where ( coord_list, tile_list ) = unzip tile_assoc
 
 -- Here is a version for the list implementation
@@ -165,8 +168,9 @@ view_list board pos dir =
 step_list :: [ Tile ] -> ScoreTracker ( Bool, [ Tile ] )
 step_list [] = noscore ( False, [] )
 step_list ts = if walkable ( head ts ) then noscore ( True, ts )
-                                       else let ( ts', s ) = runWriter $ collide ts
-                                            in writer ( ( False, ts' ), s )
+                                       else do
+                                         ts' <- collide ts
+                                         return ( False, ts' )
 
 -- Credit is due to Jeff Licquia for some refactoring of
 -- my original next_board method for the list implementation
