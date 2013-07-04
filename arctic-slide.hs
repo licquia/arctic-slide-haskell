@@ -41,22 +41,29 @@ score x = writer (x, Sum 1)
 -- Tile interactions: create a new list from the old list
 -- representing the pushed object and tiles ahead of it
 slide :: [ Tile ] -> ScoreTracker [ Tile ]
-slide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = noscore ( Ice_Block : ts )
-slide ( t : Empty : ts ) = do
-                             ts' <- slide ( t : ts )
-                             return ( Empty : ts' )
-slide ( t : ts ) | ( null ts ) || ( blocking $ head ts ) = collide ( t : ts )
+slide ( t1 : t2 : ts )
+  | t1 == Ice_Block && blocking t2 = noscore ( t1 : t2 : ts )
+  | t2 == Empty = do
+                    ts' <- slide ( t1 : ts )
+                    return ( Empty : ts' )
+  | blocking t2 = collide ( t1 : t2 : ts )
+slide ( t : ts )
+  | t == Ice_Block = noscore ( t : ts )
+  | otherwise = collide ( t : ts )
 
 collide :: [ Tile ] -> ScoreTracker [ Tile ]
 collide [] = noscore []
-collide ( t : ts ) | fixed t = noscore ( t : ts )
-collide ( Bomb : Mountain : ts) = noscore ( [ Empty, Empty ] ++ ts )
-collide ( Heart : House : ts ) = score ( [ Empty, House ] ++ ts )
-collide ( Ice_Block : ts ) | ( null ts ) || ( blocking $ head ts ) = noscore ( Empty : ts )
-collide ( t : ts ) | ( movable t ) && ( ( null ts ) || ( blocking $ head ts ) ) = noscore ( t : ts )
-collide ( t : Empty : ts ) | movable t = do
-                                           ts' <- slide ( t : ts )
-                                           return ( Empty : ts' )
+collide ( t1 : t2 : ts )
+  | ( t1, t2 ) == ( Bomb, Mountain ) = noscore ( Empty : Empty : ts )
+  | ( t1, t2 ) == ( Heart, House ) = score ( Empty : House : ts )
+  | t1 == Ice_Block && blocking t2 = noscore ( Empty : t2 : ts )
+  | movable t1 && blocking t2 = noscore ( t1 : t2 : ts )
+  | movable t1 && t2 == Empty = do
+                                  ts' <- slide ( t1 : ts )
+                                  return ( Empty : ts' )
+collide ( t : ts )
+  | t == Ice_Block = noscore ( Empty : ts )
+  | movable t = noscore ( t : ts )
 
 -- Dir represents the orientation of the penguin
 data Dir = North | East | South | West
