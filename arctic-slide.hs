@@ -41,12 +41,13 @@ score x = writer (x, Sum 1)
 -- Tile interactions: create a new list from the old list
 -- representing the pushed object and tiles ahead of it
 slide :: [ Tile ] -> ScoreTracker [ Tile ]
+slide [] = noscore []
 slide ( t1 : t2 : ts )
   | t1 == Ice_Block && blocking t2 = noscore ( t1 : t2 : ts )
-  | t2 == Empty = do
-                    ts' <- slide ( t1 : ts )
-                    return ( Empty : ts' )
   | blocking t2 = collide ( t1 : t2 : ts )
+  | otherwise = do
+                  ts' <- slide ( t1 : ts )
+                  return ( Empty : ts' )
 slide ( t : ts )
   | t == Ice_Block = noscore ( t : ts )
   | otherwise = collide ( t : ts )
@@ -58,12 +59,13 @@ collide ( t1 : t2 : ts )
   | ( t1, t2 ) == ( Heart, House ) = score ( Empty : House : ts )
   | t1 == Ice_Block && blocking t2 = noscore ( Empty : t2 : ts )
   | movable t1 && blocking t2 = noscore ( t1 : t2 : ts )
-  | movable t1 && t2 == Empty = do
-                                  ts' <- slide ( t1 : ts )
-                                  return ( Empty : ts' )
+  | movable t1 = do
+                   ts' <- slide ( t1 : ts )
+                   return ( Empty : ts' )
+  | otherwise = noscore ( t1 : t2 : ts )
 collide ( t : ts )
   | t == Ice_Block = noscore ( Empty : ts )
-  | movable t = noscore ( t : ts )
+  | otherwise = noscore ( t : ts )
 
 -- Dir represents the orientation of the penguin
 data Dir = North | East | South | West
